@@ -341,6 +341,78 @@ export async function cancelAllNotifications(): Promise<void> {
 }
 
 /**
+ * Cancel notifications for a specific habit
+ */
+export async function cancelHabitNotifications(habitId: string): Promise<void> {
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    
+    // Find all notifications for this habit
+    const habitNotifications = scheduled.filter(notif => 
+      notif.identifier.startsWith(`habit-${habitId}`)
+    );
+
+    // Cancel each one
+    for (const notif of habitNotifications) {
+      await Notifications.cancelScheduledNotificationAsync(notif.identifier);
+    }
+
+    if (__DEV__) {
+      console.log(`✅ Cancelled ${habitNotifications.length} notifications for habit ${habitId}`);
+    }
+  } catch (error) {
+    console.error('Error cancelling habit notifications:', error);
+  }
+}
+
+/**
+ * Reschedule notifications for a single habit
+ */
+export async function rescheduleHabitNotification(habit: Habit): Promise<void> {
+  try {
+    // First cancel existing notifications for this habit
+    await cancelHabitNotifications(habit.id);
+
+    // If habit has no reminder time, we're done
+    if (!habit.reminderTime || habit.archived) {
+      if (__DEV__) {
+        console.log(`⏭️ Skipping notifications for habit ${habit.id} (no reminder or archived)`);
+      }
+      return;
+    }
+
+    // Schedule new notifications
+    const [hour, minute] = habit.reminderTime.split(':').map(Number);
+
+    for (const weekday of habit.daysOfWeek) {
+      await Notifications.scheduleNotificationAsync({
+        identifier: `habit-${habit.id}-${weekday}`,
+        content: {
+          title: habit.title,
+          body: habit.description || 'Time to complete this habit!',
+          data: { type: 'habit', habitId: habit.id },
+          sound: true,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+          weekday: weekday + 1, // Expo uses 1-7, we use 0-6
+          hour,
+          minute,
+        },
+      });
+    }
+
+    if (__DEV__) {
+      console.log(`✅ Rescheduled notifications for habit: ${habit.title}`);
+      console.log(`   Time: ${habit.reminderTime}`);
+      console.log(`   Days: ${habit.daysOfWeek}`);
+    }
+  } catch (error) {
+    console.error('Error rescheduling habit notification:', error);
+  }
+}
+
+/**
  * Get all scheduled notifications (for debugging)
  */
 export async function getScheduledNotifications() {

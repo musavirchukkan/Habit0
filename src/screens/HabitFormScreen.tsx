@@ -17,6 +17,8 @@ import { WEEKDAYS } from '../constants/weekdays';
 import { HabitCategory, Weekday } from '../types/habits';
 import { useTheme, Theme } from '../theme';
 import { Screen } from '../components/Screen';
+import { rescheduleHabitNotification, cancelHabitNotifications } from '../services/notifications';
+import { useSettings } from '../hooks/useSettings';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HabitForm'>;
 
@@ -25,6 +27,7 @@ const DEFAULT_DAYS: Weekday[] = WEEKDAYS.map((d) => d.value);
 export default function HabitFormScreen({ navigation, route }: Props) {
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const { settings } = useSettings();
   const habitId = route.params?.habitId;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -87,7 +90,13 @@ export default function HabitFormScreen({ navigation, route }: Props) {
       console.log('   Category:', savedHabit.category);
       console.log('   Days:', savedHabit.daysOfWeek);
       console.log('   Archived:', savedHabit.archived);
+      console.log('   Reminder:', savedHabit.reminderTime);
       console.log('   Mode:', habitId ? 'EDIT' : 'CREATE');
+    }
+
+    // Reschedule notifications for this habit if habit reminders are enabled
+    if (settings.notifications.habitReminders) {
+      await rescheduleHabitNotification(savedHabit);
     }
 
     navigation.goBack();
@@ -101,7 +110,16 @@ export default function HabitFormScreen({ navigation, route }: Props) {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          // Cancel all notifications for this habit
+          await cancelHabitNotifications(habitId);
+          
+          // Delete the habit
           await deleteHabit(habitId);
+          
+          if (__DEV__) {
+            console.log('✅ Habit deleted and notifications cancelled:', habitId);
+          }
+          
           navigation.goBack();
         },
       },

@@ -18,6 +18,7 @@ import { Habit, HabitCompletion } from '../types/habits';
 import { calculateHabitStreak } from '../utils/streak';
 import { deleteHabit, fetchHabitById, fetchCompletions, upsertHabit } from '../storage/habits';
 import { useMemo } from 'react';
+import { cancelHabitNotifications } from '../services/notifications';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HabitDetail'>;
 
@@ -79,7 +80,16 @@ export default function HabitDetailScreen({ route, navigation }: Props) {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          // Cancel all notifications for this habit
+          await cancelHabitNotifications(habit.id);
+          
+          // Delete the habit
           await deleteHabit(habit.id);
+          
+          if (__DEV__) {
+            console.log('✅ Habit deleted and notifications cancelled:', habit.id);
+          }
+          
           navigation.goBack();
         },
       },
