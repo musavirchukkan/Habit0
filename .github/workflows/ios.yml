@@ -1,0 +1,56 @@
+name: Build iOS for Ad-Hoc Distribution
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build iOS Ad-Hoc
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build iOS Ad-Hoc
+        run: eas build --platform ios --profile ios-adhoc --non-interactive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Wait for build to complete
+        run: |
+          echo "Build submitted to EAS. Check https://expo.dev/accounts/[your-account]/builds for status"
+          echo "You can also use: eas build:list --platform ios --limit 1"
+
+      - name: Download build artifact
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "To download the build, run:"
+          echo "eas build:download --platform ios --latest"
+
