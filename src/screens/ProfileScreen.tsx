@@ -1,18 +1,67 @@
-import { useMemo } from 'react';
-import { View, Text, StyleSheet, Switch, TouchableOpacity, ActivityIndicator, Alert, ScrollView, Platform } from 'react-native';
+import { useMemo, useEffect } from 'react';
+import { View, Text, StyleSheet, Switch, TouchableOpacity, ActivityIndicator, Alert, ScrollView, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Screen } from '../components/Screen';
+import { TimeInput } from '../components/TimeInput';
 import { useTheme, Theme } from '../theme';
 import { useSettings, SETTINGS_STORAGE_KEY } from '../hooks/useSettings';
 import { useHabits } from '../hooks/useHabits';
-import { clearAllHabitData } from '../storage/habits';
+import { clearAllHabitData, fetchHabits, fetchCompletions } from '../storage/habits';
+import { getRealm } from '../storage/realm-config';
+import { 
+  requestNotificationPermissions, 
+  scheduleMorningReminder, 
+  scheduleEveningSummary,
+  scheduleSmartReminders,
+  cancelAllNotifications,
+} from '../services/notifications';
 
 const ONBOARDING_KEY = 'habit-tracker::onboardingComplete';
 
 export default function ProfileScreen() {
   const theme = useTheme();
-  const { settings, loading, setTheme, toggleNotification, setGraceDays, setStreakMode } = useSettings();
+  const { settings, loading, setTheme, toggleNotification, setNotificationTime, setGraceDays, setStreakMode } = useSettings();
   const { refresh } = useHabits();
+
+  // Request permissions and setup notifications when settings change
+  useEffect(() => {
+    const setupNotifications = async () => {
+      // Cancel all first
+      await cancelAllNotifications();
+
+      // Schedule based on settings
+      if (settings.notifications.morning) {
+        await scheduleMorningReminder(settings.notifications.morningTime);
+      }
+
+      if (settings.notifications.evening) {
+        await scheduleEveningSummary(settings.notifications.eveningTime);
+      }
+
+      if (settings.notifications.smart) {
+        await scheduleSmartReminders();
+      }
+
+      // Schedule habit-specific reminders
+      if (settings.notifications.habitReminders) {
+        const habits = await fetchHabits();
+        const { scheduleHabitReminders } = await import('../services/notifications');
+        await scheduleHabitReminders(habits.filter(h => h.reminderTime && !h.archived));
+      }
+    };
+
+    if (!loading) {
+      setupNotifications();
+    }
+  }, [
+    loading,
+    settings.notifications.morning,
+    settings.notifications.morningTime,
+    settings.notifications.evening,
+    settings.notifications.eveningTime,
+    settings.notifications.smart,
+    settings.notifications.habitReminders,
+  ]);
 
   const themeOptions = useMemo(
     () => [
@@ -92,27 +141,89 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Notifications</Text>
-          <SettingsRow
-            label="Morning"
-            hint="7:00 AM check-in"
-            value={settings.notifications.morning}
-            onToggle={() => toggleNotification('morning')}
-            styles={styles}
-          />
-          <SettingsRow
-            label="Evening"
-            hint="9:30 PM summary"
-            value={settings.notifications.evening}
-            onToggle={() => toggleNotification('evening')}
-            styles={styles}
-          />
-          <SettingsRow
-            label="Smart reminders"
-            hint="We'll nudge at the best time"
-            value={settings.notifications.smart}
-            onToggle={() => toggleNotification('smart')}
-            styles={styles}
-          />
+          <Text style={styles.sectionHint}>
+            Stay on track with smart reminders
+          </Text>
+          
+          {/* Morning Reminder */}
+          <View style={styles.notificationCard}>
+            <View style={styles.notificationHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle}>☀️ Morning Reminder</Text>
+                <Text style={styles.rowSubtitle}>Start your day with motivation</Text>
+              </View>
+              <Switch
+                value={settings.notifications.morning}
+                onValueChange={() => toggleNotification('morning')}
+              />
+            </View>
+            
+            {settings.notifications.morning && (
+              <View style={styles.timePickerContainer}>
+                <Text style={styles.timeLabel}>Notify me at:</Text>
+                <TimeInput
+                  value={settings.notifications.morningTime}
+                  onChangeTime={(time) => setNotificationTime('morningTime', time)}
+                  defaultValue="07:00"
+                  theme={theme}
+                />
+              </View>
+            )}
+          </View>
+
+          {/* Evening Summary */}
+          <View style={styles.notificationCard}>
+            <View style={styles.notificationHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle}>🌙 Evening Summary</Text>
+                <Text style={styles.rowSubtitle}>Daily progress recap</Text>
+              </View>
+              <Switch
+                value={settings.notifications.evening}
+                onValueChange={() => toggleNotification('evening')}
+              />
+            </View>
+            
+            {settings.notifications.evening && (
+              <View style={styles.timePickerContainer}>
+                <Text style={styles.timeLabel}>Notify me at:</Text>
+                <TimeInput
+                  value={settings.notifications.eveningTime}
+                  onChangeTime={(time) => setNotificationTime('eveningTime', time)}
+                  defaultValue="21:30"
+                  theme={theme}
+                />
+              </View>
+            )}
+          </View>
+
+          {/* Smart Reminders */}
+          <View style={styles.notificationCard}>
+            <View style={styles.notificationHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle}>🤖 Smart Reminders</Text>
+                <Text style={styles.rowSubtitle}>AI-powered nudges throughout the day</Text>
+              </View>
+              <Switch
+                value={settings.notifications.smart}
+                onValueChange={() => toggleNotification('smart')}
+              />
+            </View>
+          </View>
+          
+          {/* Habit Reminders */}
+          <View style={styles.notificationCard}>
+            <View style={styles.notificationHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle}>📌 Habit Reminders</Text>
+                <Text style={styles.rowSubtitle}>Set custom time for each habit</Text>
+              </View>
+              <Switch
+                value={settings.notifications.habitReminders}
+                onValueChange={() => toggleNotification('habitReminders')}
+              />
+            </View>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -357,5 +468,42 @@ const createStyles = (theme: Theme) =>
     },
     devButtonText: {
       color: theme.mode === 'dark' ? '#818cf8' : '#6366f1',
+    },
+    rowTitle: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: theme.colors.textPrimary,
+    },
+    rowSubtitle: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    notificationCard: {
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+      padding: theme.spacing.lg,
+      marginBottom: theme.spacing.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    notificationHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    timePickerContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: theme.spacing.md,
+      paddingTop: theme.spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    timeLabel: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginRight: theme.spacing.md,
+      flex: 1,
     },
   });

@@ -9,6 +9,7 @@ type SettingsContextValue = {
   loading: boolean;
   setTheme: (theme: ThemePreference) => void;
   toggleNotification: (key: keyof Settings['notifications']) => void;
+  setNotificationTime: (key: 'morningTime' | 'eveningTime', time: string) => void;
   setGraceDays: (value: 0 | 1 | 2) => void;
   setStreakMode: (mode: StreakMode) => void;
 };
@@ -59,6 +60,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [setAndPersist],
   );
 
+  const setNotificationTime = useCallback(
+    (key: 'morningTime' | 'eveningTime', time: string) => {
+      setAndPersist((prev) => ({
+        ...prev,
+        notifications: { ...prev.notifications, [key]: time },
+      }));
+    },
+    [setAndPersist],
+  );
+
   const setGraceDays = useCallback(
     (value: 0 | 1 | 2) => {
       setAndPersist((prev) => ({ ...prev, graceDays: value }));
@@ -79,10 +90,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       loading,
       setTheme,
       toggleNotification,
+      setNotificationTime,
       setGraceDays,
       setStreakMode,
     }),
-    [settings, loading, setTheme, toggleNotification, setGraceDays, setStreakMode],
+    [settings, loading, setTheme, toggleNotification, setNotificationTime, setGraceDays, setStreakMode],
   );
 
   return React.createElement(SettingsContext.Provider, { value }, children);
