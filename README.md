@@ -193,31 +193,45 @@ These are automatically removed in production builds.
 
 ## 📦 Building for Production
 
-### iOS
+### Automated Builds with GitHub Actions
 
-```bash
-npx expo build:ios --release-channel production
-```
+This repository includes GitHub Actions workflows for automated builds:
 
-### Android
+- **Android:** Builds AAB for Google Play Store
+- **iOS:** Builds ad-hoc distribution for free Apple Developer accounts
 
-```bash
-npx expo build:android --release-channel production
-```
+**Setup:**
+1. Add `EXPO_TOKEN` to GitHub Secrets (Settings → Secrets → Actions)
+2. Push to `main` branch or create a release tag
+3. Builds run automatically
 
-### Using EAS Build
+**Manual Build Commands:**
 
 ```bash
 # Install EAS CLI
 npm install -g eas-cli
 
-# Configure
+# Login
+eas login
+
+# Configure (first time)
 eas build:configure
 
-# Build
-eas build --platform ios --profile production
-eas build --platform android --profile production
+# Build Android for Play Store
+eas build --platform android --profile production-android
+
+# Build iOS for ad-hoc (free account)
+eas build --platform ios --profile ios-adhoc
 ```
+
+### Release Process
+
+1. Update version in `package.json` and `app.json`
+2. Create a git tag: `git tag v1.0.0 && git push origin v1.0.0`
+3. GitHub Actions automatically builds both platforms
+4. Download builds: `eas build:download --platform [android|ios] --latest`
+
+📖 **See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete deployment guide**
 
 ## 🗄️ Database
 
@@ -250,6 +264,30 @@ If you encounter database errors:
 - Clear cache: `npx expo start -c`
 - For iOS: Clean build folder in Xcode
 - For Android: `cd android && ./gradlew clean`
+
+## 🚀 Deployment
+
+### Google Play Store
+- ✅ Automated builds via GitHub Actions
+- ✅ **Automatic submission to Play Store** (after setup)
+- ✅ AAB format for Play Store submission
+- ✅ See [DEPLOYMENT.md](./DEPLOYMENT.md) for details
+- ✅ See [GOOGLE_PLAY_SETUP.md](./GOOGLE_PLAY_SETUP.md) for Play Store automation setup
+
+### iOS (Free Developer Account)
+- ✅ Ad-hoc distribution (up to 100 devices)
+- ✅ No $99/year App Store fee required
+- ✅ Perfect for personal use and testing
+- ✅ See [DEPLOYMENT.md](./DEPLOYMENT.md) for details
+
+### GitHub Actions
+- **Android Build:** `.github/workflows/android.yml`
+- **iOS Build:** `.github/workflows/ios.yml`
+- **Release Build:** `.github/workflows/release.yml`
+
+All workflows trigger on:
+- Push to `main`/`master` branch
+- Release tags (e.g., `v1.0.0`)
 
 ## 📄 License
 
