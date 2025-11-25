@@ -1,0 +1,112 @@
+name: Release Builds
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  android-release:
+    name: Build and Submit Android Release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android AAB for Play Store
+        id: build
+        run: |
+          echo "Starting Android build for release..."
+          eas build --platform android --profile production-android --non-interactive --json > build-output.json
+          BUILD_ID=$(node -e "console.log(require('./build-output.json').id)")
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "Build started with ID: $BUILD_ID"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Wait for build to complete
+        run: |
+          BUILD_ID="${{ steps.build.outputs.build_id }}"
+          if [ -z "$BUILD_ID" ]; then
+            echo "No build ID found, waiting for latest build..."
+            eas build:wait --non-interactive
+          else
+            echo "Waiting for build $BUILD_ID to complete..."
+            eas build:wait --id $BUILD_ID --non-interactive
+          fi
+          echo "Build completed successfully!"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Create Google Service Account file
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google-service-account.json
+          chmod 600 google-service-account.json
+
+      - name: Submit to Play Store
+        run: |
+          eas submit --platform android --profile production-android --non-interactive --latest
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f google-service-account.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            # Build artifacts will be available on EAS
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  ios-release:
+    name: Build iOS Ad-Hoc Release
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build iOS Ad-Hoc
+        run: eas build --platform ios --profile ios-adhoc --non-interactive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
