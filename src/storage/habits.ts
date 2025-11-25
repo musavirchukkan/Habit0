@@ -1,141 +1,211 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BSON } from 'realm';
 import { Habit, HabitCompletion, HabitInput } from '../types/habits';
+import { getRealm, HabitSchema, HabitCompletionSchema, deleteRealmDatabase } from './realm-config';
 
-const HABITS_KEY = 'habit-tracker::habits';
-const COMPLETIONS_KEY = 'habit-tracker::completions';
-
-const generateId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-
-async function readJSON<T>(key: string, fallback: T): Promise<T> {
-  const raw = await AsyncStorage.getItem(key);
-  if (!raw) {
-    return fallback;
-  }
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-async function writeJSON<T>(key: string, value: T) {
-  await AsyncStorage.setItem(key, JSON.stringify(value));
-}
-
+/**
+ * Fetch all habits (sorted by creation date, newest first)
+ */
 export async function fetchHabits(): Promise<Habit[]> {
-  const records = await readJSON<Habit[]>(HABITS_KEY, []);
-  return records.map((habit) => ({
-    ...habit,
-    category: habit.category ?? 'essential',
-  }));
+  const realm = await getRealm();
+  const habits = realm.objects<HabitSchema>('Habit').sorted('createdAt', true);
+  return Array.from(habits).map((h) => h.toHabit());
 }
 
+/**
+ * Fetch a single habit by ID
+ */
 export async function fetchHabitById(id: string): Promise<Habit | undefined> {
-  const habits = await fetchHabits();
-  return habits.find((habit) => habit.id === id);
+  const realm = await getRealm();
+  
+  try {
+    const objectId = BSON.ObjectId.createFromHexString(id);
+    const habit = realm.objectForPrimaryKey<HabitSchema>('Habit', objectId);
+    return habit ? habit.toHabit() : undefined;
+  } catch (error) {
+    console.error('Invalid habit ID:', id);
+    return undefined;
+  }
 }
 
+/**
+ * Create or update a habit
+ */
 export async function upsertHabit(input: HabitInput & { id?: string }): Promise<Habit> {
-  const habits = await fetchHabits();
-  const now = new Date().toISOString();
+  const realm = await getRealm();
+  const now = new Date();
+  let savedHabit: HabitSchema;
 
-  if (input.id) {
-    const matchIndex = habits.findIndex((habit) => habit.id === input.id);
-    if (matchIndex > -1) {
-      const updated: Habit = {
-        ...habits[matchIndex],
-        ...input,
-        id: input.id,
-        category: input.category ?? habits[matchIndex].category ?? 'essential',
-        updatedAt: now,
-      };
-      
-      if (__DEV__) {
-        console.log('\n💾 upsertHabit: UPDATING existing habit');
-        console.log('   ID:', updated.id);
-        console.log('   Title:', updated.title);
-        console.log('   Category:', updated.category);
-        console.log('   Days:', updated.daysOfWeek);
+  realm.write(() => {
+    if (input.id) {
+      // Update existing habit
+      try {
+        const objectId = BSON.ObjectId.createFromHexString(input.id);
+        const existing = realm.objectForPrimaryKey<HabitSchema>('Habit', objectId);
+        
+        if (existing) {
+          existing.title = input.title;
+          existing.description = input.description;
+          existing.daysOfWeek.splice(0, existing.daysOfWeek.length, ...input.daysOfWeek);
+          existing.reminderTime = input.reminderTime;
+          existing.archived = input.archived ?? false;
+          existing.category = input.category ?? 'essential';
+          existing.updatedAt = now;
+          savedHabit = existing;
+
+          if (__DEV__) {
+            console.log('\n💾 HABIT UPDATED');
+            console.log('   ID:', existing._id.toHexString());
+            console.log('   Title:', existing.title);
+            console.log('   Category:', existing.category);
+            console.log('   Days:', Array.from(existing.daysOfWeek));
+          }
+          return;
+        }
+      } catch (error) {
+        console.error('Invalid habit ID for update:', input.id);
       }
-      
-      habits[matchIndex] = updated;
-      await writeJSON(HABITS_KEY, habits);
-      return updated;
     }
-  }
 
-  const newHabit: Habit = {
-    id: input.id ?? generateId(),
-    ...input,
-    archived: input.archived ?? false,
-    category: input.category ?? 'essential',
-    createdAt: now,
-    updatedAt: now,
-  };
+    // Create new habit
+    const newHabit = {
+      _id: new BSON.ObjectId(),
+      title: input.title,
+      description: input.description,
+      daysOfWeek: input.daysOfWeek,
+      reminderTime: input.reminderTime,
+      archived: input.archived ?? false,
+      category: input.category ?? 'essential',
+      createdAt: now,
+      updatedAt: now,
+    };
 
-  if (__DEV__) {
-    console.log('\n💾 upsertHabit: Creating NEW habit');
-    console.log('   Generated ID:', newHabit.id);
-    console.log('   Title:', newHabit.title);
-    console.log('   Category:', newHabit.category);
-    console.log('   Days:', newHabit.daysOfWeek);
-  }
+    savedHabit = realm.create('Habit', newHabit);
 
-  habits.push(newHabit);
-  await writeJSON(HABITS_KEY, habits);
-  return newHabit;
+    if (__DEV__) {
+      console.log('\n💾 HABIT CREATED');
+      console.log('   ID:', savedHabit._id.toHexString());
+      console.log('   Title:', savedHabit.title);
+      console.log('   Category:', savedHabit.category);
+      console.log('   Days:', Array.from(savedHabit.daysOfWeek));
+    }
+  });
+
+  return savedHabit!.toHabit();
 }
 
+/**
+ * Delete a habit and all its completions
+ */
 export async function deleteHabit(id: string) {
-  const habits = await fetchHabits();
-  const next = habits.filter((habit) => habit.id !== id);
-  await writeJSON(HABITS_KEY, next);
-  await clearHabitCompletions(id);
+  const realm = await getRealm();
+
+  realm.write(() => {
+    try {
+      const objectId = BSON.ObjectId.createFromHexString(id);
+      const habit = realm.objectForPrimaryKey<HabitSchema>('Habit', objectId);
+      
+      if (habit) {
+        // Delete all completions for this habit
+        const completions = realm.objects<HabitCompletionSchema>('HabitCompletion')
+          .filtered('habitId = $0', id);
+        realm.delete(completions);
+        
+        // Delete the habit
+        realm.delete(habit);
+
+        if (__DEV__) {
+          console.log(`🗑️ Deleted habit: ${id} (${completions.length} completions)`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete habit:', id, error);
+    }
+  });
 }
 
+/**
+ * Fetch all completions (sorted by completion time, newest first)
+ */
 export async function fetchCompletions(): Promise<HabitCompletion[]> {
-  return readJSON(COMPLETIONS_KEY, []);
+  const realm = await getRealm();
+  const completions = realm.objects<HabitCompletionSchema>('HabitCompletion')
+    .sorted('completedAt', true);
+  return Array.from(completions).map((c) => c.toCompletion());
 }
 
+/**
+ * Fetch completions for a specific date
+ */
 export async function fetchCompletionsForDate(date: string): Promise<HabitCompletion[]> {
-  const completions = await fetchCompletions();
-  return completions.filter((entry) => entry.date === date);
+  const realm = await getRealm();
+  const completions = realm.objects<HabitCompletionSchema>('HabitCompletion')
+    .filtered('date = $0', date);
+  return Array.from(completions).map((c) => c.toCompletion());
 }
 
+/**
+ * Mark a habit as complete for a specific date
+ */
 export async function markHabitComplete(habitId: string, date: string): Promise<HabitCompletion> {
-  const completions = await fetchCompletions();
-  const existing = completions.find((entry) => entry.habitId === habitId && entry.date === date);
+  const realm = await getRealm();
+
+  // Check if already completed
+  const existing = realm.objects<HabitCompletionSchema>('HabitCompletion')
+    .filtered('habitId = $0 AND date = $1', habitId, date)[0];
 
   if (existing) {
-    return existing;
+    return existing.toCompletion();
   }
 
-  const entry: HabitCompletion = {
-    id: generateId(),
-    habitId,
-    date,
-    completedAt: new Date().toISOString(),
-  };
+  let completion: HabitCompletionSchema;
+  realm.write(() => {
+    completion = realm.create('HabitCompletion', {
+      _id: new BSON.ObjectId(),
+      habitId,
+      date,
+      completedAt: new Date(),
+    });
 
-  completions.push(entry);
-  await writeJSON(COMPLETIONS_KEY, completions);
-  return entry;
+    if (__DEV__) {
+      console.log(`✅ Marked complete: ${habitId} on ${date}`);
+    }
+  });
+
+  return completion!.toCompletion();
 }
 
+/**
+ * Unmark a habit completion
+ */
 export async function unmarkHabitComplete(habitId: string, date: string) {
-  const completions = await fetchCompletions();
-  const next = completions.filter((entry) => !(entry.habitId === habitId && entry.date === date));
-  await writeJSON(COMPLETIONS_KEY, next);
+  const realm = await getRealm();
+
+  realm.write(() => {
+    const completions = realm.objects<HabitCompletionSchema>('HabitCompletion')
+      .filtered('habitId = $0 AND date = $1', habitId, date);
+    
+    if (completions.length > 0) {
+      realm.delete(completions);
+      
+      if (__DEV__) {
+        console.log(`❌ Unmarked: ${habitId} on ${date}`);
+      }
+    }
+  });
 }
 
-async function clearHabitCompletions(habitId: string) {
-  const completions = await fetchCompletions();
-  const next = completions.filter((entry) => entry.habitId !== habitId);
-  await writeJSON(COMPLETIONS_KEY, next);
-}
-
+/**
+ * Clear all habit data (for dev reset)
+ */
 export async function clearAllHabitData() {
-  await AsyncStorage.multiRemove([HABITS_KEY, COMPLETIONS_KEY]);
+  try {
+    await deleteRealmDatabase();
+    
+    if (__DEV__) {
+      console.log('✅ All habit data cleared');
+    }
+  } catch (error) {
+    console.error('❌ Failed to clear habit data:', error);
+    throw error;
+  }
 }
-

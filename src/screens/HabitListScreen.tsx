@@ -43,15 +43,13 @@ export default function HabitListScreen({ navigation }: Props) {
   const { habits, loading, refresh } = useHabits();
   const [streaks, setStreaks] = useState<Record<string, number>>({});
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'essential' | 'flexible' | 'archived'>('all');
+  const [filter, setFilter] = useState<'all' | 'essential' | 'flexible' | 'weekly' | 'archived'>('all');
 
+  // Refresh habits when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      // Only refresh if we don't have habits loaded yet
-      if (habits.length === 0) {
-        refresh();
-      }
-    }, [refresh, habits.length]),
+      refresh();
+    }, [refresh]),
   );
 
   const visibleHabits = useMemo(() => {
@@ -71,6 +69,7 @@ export default function HabitListScreen({ navigation }: Props) {
     { key: 'all', label: 'All' },
     { key: 'essential', label: 'Essentials' },
     { key: 'flexible', label: 'Flexible' },
+    { key: 'weekly', label: 'Weekly' },
     { key: 'archived', label: 'Archived' },
   ];
   const empty = visibleHabits.length === 0;

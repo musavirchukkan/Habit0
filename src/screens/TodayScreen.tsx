@@ -8,7 +8,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { format, startOfDay } from 'date-fns';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Screen } from '../components/Screen';
 import { Theme, useTheme } from '../theme';
 import { useHabits } from '../hooks/useHabits';
@@ -80,9 +80,13 @@ export default function TodayScreen() {
     loadCompletions();
   }, [loadCompletions]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  // Refresh habits when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+      loadCompletions();
+    }, [refresh, loadCompletions])
+  );
 
   // Calculate total streak from all essential habits
   useEffect(() => {
@@ -129,7 +133,7 @@ export default function TodayScreen() {
     }
   }, [completedIds, essentials]);
 
-  const toggleHabit = async (habitId: string) => {
+  const toggleHabit = useCallback(async (habitId: string) => {
     if (completedIds.has(habitId)) {
       await unmarkHabitComplete(habitId, isoDate);
       setCompletedIds((prev) => {
@@ -145,7 +149,10 @@ export default function TodayScreen() {
         return next;
       });
     }
-  };
+    
+    // Reload completions to update streak calculation in real-time
+    await loadCompletions();
+  }, [completedIds, isoDate, loadCompletions]);
 
   const essentialProgress = essentials.length
     ? Math.round((essentials.filter((habit) => completedIds.has(habit.id)).length / essentials.length) * 100)
