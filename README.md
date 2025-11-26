@@ -2,7 +2,7 @@
 
 A beautiful, feature-rich habit tracking app built with React Native and Expo. Track your daily habits, build streaks, and achieve your goals with an intuitive and modern interface.
 
-![HabitØ](https://img.shields.io/badge/version-1.0.0-blue)
+![HabitØ](https://img.shields.io/badge/version-1.0.1-blue)
 ![React Native](https://img.shields.io/badge/React%20Native-0.81.5-61DAFB)
 ![Expo](https://img.shields.io/badge/Expo-54.0.25-000020)
 
@@ -226,11 +226,45 @@ eas build --platform ios --profile ios-adhoc
 
 ### Release Process
 
-1. Update version in `package.json` and `app.json`
-2. Create a git tag: `git tag v1.0.0 && git push origin v1.0.0`
-3. GitHub Actions automatically builds both platforms
-4. Download builds: `eas build:download --platform [android|ios] --latest`
+We have an **automated release system** that creates GitHub releases when you push a version tag:
 
+#### Quick Release (Automated Script)
+```bash
+# Make the script executable (first time only)
+chmod +x scripts/release.sh
+
+# Create a new release
+./scripts/release.sh 1.0.2
+```
+
+The script will:
+1. ✅ Update `package.json` and `app.json` versions
+2. ✅ Verify release notes exist in `RELEASE_NOTES.md`
+3. ✅ Commit and tag the release
+4. ✅ Push to GitHub
+5. ✅ Trigger automatic GitHub Release creation
+
+#### Manual Release
+```bash
+# 1. Update versions in package.json and app.json
+# 2. Add release notes to RELEASE_NOTES.md
+# 3. Commit changes
+git add .
+git commit -m "chore: bump version to 1.0.2"
+
+# 4. Create and push tag
+git tag v1.0.2
+git push origin main
+git push origin v1.0.2
+```
+
+#### What Happens Automatically
+- 📝 GitHub Release is created with notes from `RELEASE_NOTES.md`
+- 🏷️ Release is tagged with version number
+- 📋 Commit history is included
+- 🔗 Release appears on GitHub Releases page
+
+📖 **See [RELEASE_GUIDE.md](./RELEASE_GUIDE.md) for detailed release instructions**  
 📖 **See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete deployment guide**
 
 ## 🗄️ Database
