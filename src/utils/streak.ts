@@ -33,7 +33,17 @@ export function calculateHabitStreak(
     }
 
     const dateKey = iso(cursor);
-    if (!completionSet.has(dateKey)) {
+    const isCompleted = completionSet.has(dateKey);
+    const isToday = cursor.getTime() === today.getTime();
+
+    // If it's today and not completed, skip it (don't break streak, just don't count it)
+    if (isToday && !isCompleted) {
+      cursor = subDays(cursor, 1);
+      continue;
+    }
+
+    // If it's a past scheduled day and not completed, streak is broken
+    if (!isCompleted) {
       return {
         count: streak,
         lastCompletion,
@@ -41,6 +51,7 @@ export function calculateHabitStreak(
       };
     }
 
+    // Count this day in the streak
     streak += 1;
     lastCompletion = dateKey;
     cursor = subDays(cursor, 1);

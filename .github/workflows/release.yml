@@ -1,112 +1,120 @@
-name: Release Builds
+name: Create Release
 
+# Trigger when a tag is pushed (e.g., v1.0.1, v1.0.2)
 on:
   push:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
 jobs:
-  android-release:
-    name: Build and Submit Android Release
+  create-release:
+    name: Create GitHub Release
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: 18
-          cache: 'npm'
+          fetch-depth: 0
 
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Get tag name
+        id: tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Android AAB for Play Store
-        id: build
+      - name: Extract version from tag
+        id: version
         run: |
-          echo "Starting Android build for release..."
-          eas build --platform android --profile production-android --non-interactive --json > build-output.json
-          BUILD_ID=$(node -e "console.log(require('./build-output.json').id)")
-          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
-          echo "Build started with ID: $BUILD_ID"
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          TAG=${{ steps.tag.outputs.tag }}
+          VERSION=${TAG#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Wait for build to complete
+      - name: Extract release notes for this version
+        id: release_notes
         run: |
-          BUILD_ID="${{ steps.build.outputs.build_id }}"
-          if [ -z "$BUILD_ID" ]; then
-            echo "No build ID found, waiting for latest build..."
-            eas build:wait --non-interactive
-          else
-            echo "Waiting for build $BUILD_ID to complete..."
-            eas build:wait --id $BUILD_ID --non-interactive
+          VERSION=${{ steps.version.outputs.version }}
+          
+          # Extract the section for this version from RELEASE_NOTES.md
+          # This will get everything between "## Version X.X.X" and the next "## Version" or "---"
+          awk -v ver="$VERSION" '
+            /^## Version / {
+              if ($3 == ver || $3 == ver" ") {
+                found=1;
+                next;
+              } else if (found) {
+                exit;
+              }
+            }
+            found && /^---$/ { exit }
+            found && /^## Version / { exit }
+            found { print }
+          ' RELEASE_NOTES.md > release_notes_temp.md
+          
+          # If no specific notes found, use a default message
+          if [ ! -s release_notes_temp.md ]; then
+            echo "Release version $VERSION" > release_notes_temp.md
+            echo "" >> release_notes_temp.md
+            echo "See [RELEASE_NOTES.md](RELEASE_NOTES.md) for details." >> release_notes_temp.md
           fi
-          echo "Build completed successfully!"
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Create Google Service Account file
-        run: |
-          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google-service-account.json
-          chmod 600 google-service-account.json
-
-      - name: Submit to Play Store
-        run: |
-          eas submit --platform android --profile production-android --non-interactive --latest
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Cleanup
-        if: always()
-        run: |
-          rm -f google-service-account.json
+          
+          cat release_notes_temp.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            # Build artifacts will be available on EAS
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          body_path: release_notes_temp.md
           draft: false
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  ios-release:
-    name: Build iOS Ad-Hoc Release
-    runs-on: macos-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Upload release notes as artifact
+        uses: actions/upload-artifact@v4
         with:
-          node-version: 18
-          cache: 'npm'
+          name: release-notes-${{ steps.version.outputs.version }}
+          path: release_notes_temp.md
+          retention-days: 90
 
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build iOS Ad-Hoc
-        run: eas build --platform ios --profile ios-adhoc --non-interactive --no-wait
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
+  # Build artifacts job is commented out - uncomment when you have EAS credentials
+  # See RELEASE_GUIDE.md for instructions on setting up automated builds
+  
+  # build-artifacts:
+  #   name: Build Release Artifacts
+  #   needs: create-release
+  #   runs-on: ubuntu-latest
+  #   
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '20'
+  #         cache: 'npm'
+  #
+  #     - name: Install dependencies
+  #       run: npm ci
+  #
+  #     - name: Setup EAS
+  #       uses: expo/expo-github-action@v8
+  #       with:
+  #         eas-version: latest
+  #         token: ${{ secrets.EXPO_TOKEN }}
+  #
+  #     - name: Build Android APK
+  #       run: eas build --platform android --profile preview --non-interactive
+  #
+  #     - name: Upload APK to release
+  #       if: success()
+  #       uses: softprops/action-gh-release@v1
+  #       with:
+  #         tag_name: ${{ github.ref_name }}
+  #         files: '*.apk'
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
